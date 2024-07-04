@@ -1,4 +1,5 @@
 package strlib
+
 import (
 	"crypto/aes"
 	"crypto/cipher"
@@ -8,46 +9,54 @@ import (
 	"io"
 )
 
-func TestEnDecrypt() {
-	key := []byte("example key 1234") // 16, 24, or 32 bytes to select AES-128, AES-192, or AES-256
+// func TestEnDeCrypt() {
+// 	key := []byte("dlgdabrnabrndlgd") // 需要 16, 24 或 32 字节的密钥
+// 	plaintext := "Hello, World!"
 
-	text := "Hello, World!"
-	fmt.Println("Original Text:", text)
+// 	// 加密
+// 	ciphertext, err := Encrypt(key, plaintext)
+// 	if err != nil {
+// 		fmt.Println("加密错误:", err)
+// 		return
+// 	}
+// 	fmt.Println("加密后的文本:", ciphertext)
 
-	ciphertext, err := Encrypt(key, text)
+// 	// 解密
+// 	decryptedText, err := Decrypt(key, ciphertext)
+// 	if err != nil {
+// 		fmt.Println("解密错误:", err)
+// 		return
+// 	}
+// 	fmt.Println("解密后的文本:", decryptedText)
+// }
+
+func newGCM(key []byte) (cipher.AEAD, error) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	fmt.Println("Encrypted:", ciphertext)
-
-	decrypted, err := Decrypt(key, ciphertext)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println("Decrypted Text:", decrypted)
+	return cipher.NewGCM(block)
 }
 
 //对字符串进行加密和解密。
 //请注意，这里的key长度必须是16、24或32字节，对应AES-128、AES-192或AES-256。
 //字符串进行AES加密，并返回Base64编码的密文。
 //decrypt 函数接受Base64编码的密文并解密为原始字符串。
-func Encrypt(key []byte, text string) (string, error) {
-	plaintext := []byte(text)
-
-	block, err := aes.NewCipher(key)
+func Encrypt(key []byte, plaintext string) (string, error) {
+	// 生成随机的 nonce
+	gcm, err := newGCM(key)
 	if err != nil {
 		return "", err
 	}
-
-	ciphertext := make([]byte, aes.BlockSize+len(plaintext))
-	iv := ciphertext[:aes.BlockSize]
-	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return "", err
 	}
 
-	mode := cipher.NewCBCEncrypter(block, iv)
-	mode.CryptBlocks(ciphertext[aes.BlockSize:], plaintext)
+	// 加密
+	ciphertext := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
 
+	// 返回 Base64 编码的密文
 	return base64.URLEncoding.EncodeToString(ciphertext), nil
 }
 
@@ -57,21 +66,23 @@ func Decrypt(key []byte, cryptoText string) (string, error) {
 		return "", err
 	}
 
-	block, err := aes.NewCipher(key)
+	gcm, err := newGCM(key)
 	if err != nil {
 		return "", err
 	}
 
-	if len(ciphertext) < aes.BlockSize {
-		return "", fmt.Errorf("ciphertext too short")
+	// 提取 nonce
+	nonceSize := gcm.NonceSize()
+	if len(ciphertext) < nonceSize {
+		return "", fmt.Errorf("密文太短")
+	}
+	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
+
+	// 解密
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", err
 	}
 
-	iv := ciphertext[:aes.BlockSize]
-	ciphertext = ciphertext[aes.BlockSize:]
-
-	mode := cipher.NewCBCDecrypter(block, iv)
-	mode.CryptBlocks(ciphertext, ciphertext)
-
-	return string(ciphertext), nil
+	return string(plaintext), nil
 }
-
